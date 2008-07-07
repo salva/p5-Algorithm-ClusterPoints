@@ -1,6 +1,6 @@
 package Algorithm::ClusterPoints;
 
-our $VERSION = '0.04';
+our $VERSION = '0.06';
 
 use strict;
 use warnings;
@@ -26,6 +26,8 @@ sub new {
     my $radius = delete $opts{radius};
     my $minimum_size = delete $opts{minimum_size};
     my $ordered = delete $opts{ordered};
+    my $scales = delete $opts{scales};
+    my $dimensional_groups = delete $opts{dimensional_groups};
 
     %opts and croak "unknown constructor option(s) '".join("', '", sort keys %opts)."'";
 
@@ -34,11 +36,21 @@ sub new {
                        ordered => 0,
                        dimension => $dimension,
                        coords => [ map [], 1..$dimension ],
+                       scales => [ map 1, 1..$dimension ],
+                       dimensional_groups => [[0..$dimension-1]],
                      }, $class;
 
     $self->radius($radius) if defined $radius;
     $self->minimum_size($minimum_size) if defined $minimum_size;
     $self->ordered($ordered) if defined $ordered;
+    if (defined $scales) {
+        ref $scales eq 'ARRAY' or croak 'ARRAY reference expected for "scales" option';
+        $self->scales(@$scales);
+    }
+    if (defined $dimensional_groups) {
+        ref $dimensional_groups eq 'ARRAY' or croak 'ARRAY reference expected for "dimensional_groups" option';
+        $self->dimensional_groups(@$dimensional_groups);
+    }
     $self;
 }
 
@@ -105,6 +117,36 @@ sub minimum_size {
     $self->{minimum_size};
 }
 
+sub scales {
+    my $self = shift;
+    my $dimensions = $self->{dimensions};
+    if (@_) {
+        @_ == $dimensions or croak 'Usage: $self->scales($scale_x, $scale_y, ...)';
+        grep($_ <= 0, @_) and croak 'positive number required';
+        @{$self->{scales}} = @_;
+        delete $self->{_clusters};
+    }
+    return @{$self->{scales}};
+}
+
+sub dimensional_groups {
+    my $self = shift;
+    my $hcb = $self->{dimensional_groups};
+    my $dimension = $self->{dimension};
+    if (@_) {
+        my @all = eval {
+            no warnings;
+            sort { $a <=> $b } map @$_, @_;
+        };
+        croak 'bad dimension groups'
+            unless (@all == $dimension and
+                    join('|', @all) eq join('|', 0..$dimension-1));
+        $self->{dimensional_groups} = [map [@$_], @_];
+        delete $self->{_clusters};
+    }
+    map [@$_], @{$self->{dimensional_groups}};
+}
+
 sub clusters {
     my $self = shift;
     my $clusters = $self->{_clusters} ||= $self->_make_clusters_ix;
@@ -130,68 +172,84 @@ sub clusters_ix {
 }
 
 sub _touch_2 {
-    my ($radius, $c1, $c2, $ax, $ay) = @_;
+    my ($c1, $c2, $ax, $ay) = @_;
 
     my $c1_xmin = min @{$ax}[@$c1];
     my $c2_xmax = max @{$ax}[@$c2];
-    return 0 if $c1_xmin - $c2_xmax > $radius;
+    return 0 if $c1_xmin - $c2_xmax > 1;
 
     my $c1_xmax = max @{$ax}[@$c1];
     my $c2_xmin = min @{$ax}[@$c2];
-    return 0 if $c2_xmin - $c1_xmax > $radius;
+    return 0 if $c2_xmin - $c1_xmax > 1;
 
     my $c1_ymin = min @{$ay}[@$c1];
     my $c2_ymax = max @{$ay}[@$c2];
-    return 0 if $c1_ymin - $c2_ymax > $radius;
+    return 0 if $c1_ymin - $c2_ymax > 1;
 
     my $c1_ymax = max @{$ay}[@$c1];
     my $c2_ymin = min @{$ay}[@$c2];
-    return 0 if $c2_ymin - $c1_ymax > $radius;
+    return 0 if $c2_ymin - $c1_ymax > 1;
 
-    my $r2 = $radius * $radius;
     for my $i (@$c1) {
         for my $j (@$c2) {
             my $dx = $ax->[$i] - $ax->[$j];
             my $dy = $ay->[$i] - $ay->[$j];
-            return 1 if ($dx * $dx + $dy * $dy <= $r2);
+            return 1 if ($dx * $dx + $dy * $dy <= 1);
         }
     }
     0;
 }
 
 sub _touch {
-    my ($radius, $c1, $c2, $coords) = @_;
+    my ($c1, $c2, $coords, $groups) = @_;
     # print STDERR "touch($c1->[0], $c2->[0])\n";
 
     for my $coord (@$coords) {
         my $c1_min = min @{$coord}[@$c1];
         my $c2_max = max @{$coord}[@$c2];
-        return 0 if $c1_min - $c2_max > $radius;
+        return 0 if $c1_min - $c2_max > 1;
 
         my $c1_max = max @{$coord}[@$c1];
         my $c2_min = min @{$coord}[@$c2];
-        return 0 if $c2_min - $c1_max > $radius;
+        return 0 if $c2_min - $c1_max > 1;
     }
 
-    my $r2 = $radius * $radius;
     for my $i (@$c1) {
-        for my $j (@$c2) {
-            my $sum = 0;
-            for (@$coords) {
-                my $delta = $_->[$i] - $_->[$j];
-                $sum += $delta * $delta;
+    J: for my $j (@$c2) {
+            for my $group (@$groups) {
+                my $sum = 0;
+                for (@{$coords}[@$group]) {
+                    my $delta = $_->[$i] - $_->[$j];
+                    $sum += $delta * $delta;
+                }
+                next J if $sum > 1;
             }
-            return 1 if $sum <= $r2;
+            # print STDERR "they touch\n";
+            return 1;
         }
     }
-    # print STDERR "don't touch\n";
     0;
 }
+
+sub _scaled_coords {
+    my $self = shift;
+    my @coords = @{$self->{coords}};
+    my $scales = $self->{scales};
+    my $ir = 1.0 / $self->{radius};
+    for my $dimension (0..$#coords) {
+        my $scale = abs($ir * $scales->[$dimension]);
+        next if $scale == 1;
+        $coords[$dimension] = [ map $scale * $_, @{$coords[$dimension]} ];
+    }
+    @coords;
+}
+
+sub _hypercylinder_id { join '|', map join(',', @$_), @_ }
 
 sub _make_clusters_ix {
     my $self = shift;
     # print STDERR Dumper $self;
-    $self->{dimension} == 2
+    _hypercylinder_id($self->dimensional_groups) eq '0,1'
         ? $self->_make_clusters_ix_2
         : $self->_make_clusters_ix_any;
 }
@@ -199,31 +257,26 @@ sub _make_clusters_ix {
 sub _make_clusters_ix_2 {
     my $self = shift;
 
-    my $radius = $self->{radius};
-    my $scale = 1.00001*sqr2/$radius;
-
     $self->{dimension} == 2
         or croak 'internal error: _make_clusters_ix_2 called but dimension is not 2';
 
-    my $ax = $self->{coords}[0];
-    my $ay = $self->{coords}[1];
+    my ($ax, $ay) = $self->_scaled_coords;
     @$ax or croak "points have not been added";
 
     my $xmin = min @$ax;
-    my $xmax = max @$ax;
     my $ymin = min @$ay;
-    my $ymax = max @$ay;
+    # my $xmax = max @$ax;
+    # my $ymax = max @$ay;
 
-    my @fx = map { floor($scale * ($_ - $xmin)) } @$ax;
-    my @fy = map { floor($scale * ($_ - $ymin)) } @$ay;
+    my $istep = 1.00001*sqr2;
+    my @fx = map { floor($istep * ($_ - $xmin)) } @$ax;
+    my @fy = map { floor($istep * ($_ - $ymin)) } @$ay;
 
     my (%ifx, %ify, $c);
     $c = 1; $ifx{$_} ||= $c++ for @fx;
     $c = 1; $ify{$_} ||= $c++ for @fy;
     my %rifx = reverse %ifx;
     my %rify = reverse %ify;
-
-    # print STDERR "radius: $radius\n";
 
     my %cell;
     # my %cellid;
@@ -256,7 +309,7 @@ sub _make_clusters_ix_2 {
                 my $cluster = $cell2cluster{$neighbor};
                 if ( defined $cluster and
                      !$cluster{$cluster} and
-                     _touch_2($radius, $cell{$cell}, $cell{$neighbor}, $ax, $ay) ) {
+                     _touch_2($cell{$cell}, $cell{$neighbor}, $ax, $ay) ) {
                     $cluster{$cluster} = 1;
                 }
             }
@@ -314,57 +367,79 @@ sub _make_clusters_ix_2 {
     return \@clusters;
 }
 
+my %delta_hypercylinder; # cache
 
-sub _delta_sphere {
-    my $dimension = shift;
-    my @delta_sphere = [];
-    my $delta_top = ceil(sqrt($dimension));
-    my @deltas = (-$delta_top..$delta_top);
-    # print STDERR "deltas: @deltas\n";
-    for (1..$dimension) {
-        my @next;
-        for my $ds (@delta_sphere) {
-            push @next, map [@$ds, $_], @deltas;
+sub _delta_hypercylinder {
+
+    my $dhc = $delta_hypercylinder{_hypercylinder_id @_} ||= do {
+        my @subdimension;
+        for my $group (@_) {
+            $subdimension[$_] = @$group for @$group;
         }
-        @delta_sphere = @next;
-    }
-    my $delta_top2 = $delta_top * $delta_top;
-    grep {
-        my $sum = 0;
-        for (@$_) {
-            my $min = ($_ ? abs($_) - 1 : 0);
-            $sum += $min * $min;
+        my @top = map ceil(sqrt($_)), @subdimension;
+        # calculate minimum hypercube
+        my @delta_hypercylinder = [];
+        for my $dimension (0..$#subdimension) {
+            my @next;
+            for my $dhc (@delta_hypercylinder) {
+                my $top = $top[$dimension];
+                push @next, map [@$dhc, $_], -$top..$top;
+            }
+            @delta_hypercylinder = @next;
         }
-        $sum < $delta_top2;
-    } @delta_sphere;
+
+        # filter out hyperpixels out of the hypercylinder
+        for my $group (@_) {
+            my $max = sqrt(@$group);
+            @delta_hypercylinder = grep {
+                my $sum = 0;
+                for (@$_[@$group]) {
+                    my $min = ($_ ? abs($_) - 1 : 0);
+                    $sum += $min * $min;
+                }
+                $sum < $max
+            } @delta_hypercylinder;
+        }
+
+        # print Data::Dumper->Dump([\@delta_hypercylinder], [qw($hc)]);
+
+        \@delta_hypercylinder
+    };
+    @$dhc;
 }
 
-my %delta_sphere; # cache
+
+
 sub _make_clusters_ix_any {
     my $self = shift;
 
-    my $radius = $self->{radius};
     my $dimension = $self->{dimension};
-    my $dimension_top = $dimension - 1;
-    my $scale = 1.00001*sqrt($dimension)/$radius;
-    my $coords = $self->{coords};
-    my $top = $#{$coords->[0]};
+    my @coords = $self->_scaled_coords;
+    my $coords = \@coords;
+    my $top = $#{$coords[0]};
     $top >= 0 or croak "points have not been added";
+    my $groups = $self->{dimensional_groups};
 
     my (@fls, @ifls, @rifls);
-    for my $coord (@$coords) {
-        my $min = min @$coord;
-        my @fl = map floor($scale * ($_ - $min)), @$coord;
-        push @fls, \@fl;
-        my %ifl;
-        my $c = 1;
-        $ifl{$_} ||= $c++ for @fl;
-        push @ifls, \%ifl;
-        my %rifl = reverse %ifl;
-        push @rifls, \%rifl;
+
+    for my $group (@$groups) {
+        my $istep = 1.000001 * sqrt(@$group);
+        for my $dimension (@$group) {
+            my $coord = $coords[$dimension];
+            my $min = min @$coord;
+            my @fl = map floor($istep * ($_ - $min)), @$coord;
+            $fls[$dimension] = \@fl;
+            my %ifl;
+            my $c = 1;
+            $ifl{$_} ||= $c++ for @fl;
+            $ifls[$dimension] = \%ifl;
+            my %rifl = reverse %ifl;
+            $rifls[$dimension] = \%rifl;
+        }
     }
 
     my %cell;
+    my $dimension_top = $dimension - 1;
     for my $i (0..$top) {
         my $cell = pack $packing => map $ifls[$_]{$fls[$_][$i]}, 0..$dimension_top;
         push @{$cell{$cell}}, $i;
@@ -372,24 +447,25 @@ sub _make_clusters_ix_any {
     # print STDERR "\%cell:\n", Dumper [values %cell];
 
     my %cell2cluster; # n to 1 relation
-    my %cluster2cell; # when $cluster2cell{$foo} does not exists
+    my %cluster2cell;
 
-    my @delta_sphere = @{$delta_sphere{$dimension} ||= [_delta_sphere($dimension)]};
-    # print STDERR "delta_sphere\n", Dumper \@delta_sphere;
+    my @delta_hypercylinder = _delta_hypercylinder @$groups;
+    # print STDERR "delta_hypercylinder\n", Dumper \@delta_hypercylinder;
 
     while(defined (my $cell = each %cell)) {
         my %cluster;
         my @ifl = unpack $packing => $cell;
         my @fl = map $rifls[$_]{$ifl[$_]}, 0..$dimension_top;
 
-        for my $delta (@delta_sphere) {
+        for my $delta (@delta_hypercylinder) {
+            # print STDERR "\$delta: @$delta\n";
             my @ifl = map { $ifls[$_]{$fl[$_] + $delta->[$_]} || next } 0..$dimension_top;
             # next if grep !defined, @ifl;
             my $neighbor = pack $packing => @ifl;
             my $cluster = $cell2cluster{$neighbor};
             if ( defined $cluster and
                  !$cluster{$cluster} and
-                 _touch($radius, $cell{$cell}, $cell{$neighbor}, $coords) ) {
+                 _touch($cell{$cell}, $cell{$neighbor}, $coords, $groups) ) {
                 $cluster{$cluster} = 1;
             }
         }
@@ -448,7 +524,7 @@ sub _make_clusters_ix_any {
 
 sub brute_force_clusters_ix {
     my $self = shift;
-    $self->{dimension} == 2
+    _hypercylinder_id($self->dimensional_groups) eq '0,1'
         ? $self->brute_force_clusters_ix_2
         : $self->brute_force_clusters_ix_any
 }
@@ -457,14 +533,10 @@ sub brute_force_clusters_ix_2 {
     @_ == 1 or croak 'Usage: $clp->brute_force_clusters_ix_2';
     my $self = shift;
 
-    my $radius = $self->{radius};
-    my $radius2 = $radius * $radius;
-
     $self->{dimension} == 2
         or croak "brute_force_clusters_ix_2 called but dimension is not equal to 2";
-    
-    my $ax = $self->{coords}[0];
-    my $ay = $self->{coords}[1];
+
+    my ($ax, $ay) = $self->_scaled_coords;
     @$ax or croak "points have not been added";
 
     my @ix = 0..$#$ax;
@@ -481,7 +553,7 @@ sub brute_force_clusters_ix_2 {
                 # print STDERR "ix: $ix, current: $current\n";
                 my $dx = $ax->[$ix] - $ax->[$current];
                 my $dy = $ay->[$ix] - $ay->[$current];
-                if ($dx * $dx + $dy * $dy <= $radius2) {
+                if ($dx * $dx + $dy * $dy <= 1) {
                     # print STDERR "they are together\n";
                     push @queue, $ix;
                     last;
@@ -494,7 +566,7 @@ sub brute_force_clusters_ix_2 {
                         # print STDERR "ix: $ix, done: $done\n";
                         my $dx = $ax->[$ix] - $ax->[$done];
                         my $dy = $ay->[$ix] - $ay->[$done];
-                        if ($dx * $dx + $dy * $dy <= $radius2) {
+                        if ($dx * $dx + $dy * $dy <= 1) {
                             # print STDERR "they are together\n";
                             push @queue, $done;
                             undef $done;
@@ -517,17 +589,29 @@ sub brute_force_clusters_ix_2 {
     return @clusters;
 }
 
+sub _points_touch {
+    my ($ix0, $ix1, $coords, $groups) = @_;
+    for my $group (@$groups) {
+        my $sum = 0;
+        for (@{$coords}[@$group]) {
+            my $delta = $_->[$ix0] - $_->[$ix1];
+            $sum += $delta * $delta;
+        }
+        return 0 if $sum > 1;
+    }
+    return 1;
+}
+
 sub brute_force_clusters_ix_any {
     @_ == 1 or croak 'Usage: $clp->brute_force_clusters_ix_any';
     my $self = shift;
 
-    my $radius = $self->{radius};
-    my $radius2 = $radius * $radius;
-
     my $dimension = $self->{dimension};
-    my $coords = $self->{coords};
+    my $coords = [ $self->_scaled_coords ];
     my @ix = 0..$#{$coords->[0]};
     @ix or croak "points have not been added";
+
+    my $groups = $self->{dimensional_groups};
 
     my @clusters;
     while (@ix) {
@@ -539,14 +623,7 @@ sub brute_force_clusters_ix_any {
             my $ix = shift @ix;
             my @queue;
             for my $current (@current) {
-                # print STDERR "ix: $ix, current: $current\n";
-                my $sum = 0;
-                for (@$coords) {
-                    my $delta = $_->[$ix] - $_->[$current];
-                    $sum += $delta * $delta;
-                }
-                if ($sum <= $radius2) {
-                    # print STDERR "they are together\n";
+                if (_points_touch($ix, $current, $coords, $groups)) {
                     push @queue, $ix;
                     last;
                 }
@@ -556,13 +633,7 @@ sub brute_force_clusters_ix_any {
                     for my $done (@done) {
                         next unless defined $done;
                         # print STDERR "ix: $ix, done: $done\n";
-                        my $sum = 0;
-                        for (@$coords) {
-                            my $delta = $_->[$ix] - $_->[$done];
-                            $sum += $delta * $delta;
-                        }
-                        if ($sum <= $radius2) {
-                            # print STDERR "they are together\n";
+                        if (_points_touch($ix, $done, $coords, $groups)) {
                             push @queue, $done;
                             undef $done;
                         }
@@ -588,13 +659,15 @@ sub distance {
     @_ == 3 or croak 'Usage: $clp->distance($ix0, $ix1)';
     my ($self, $ix0, $ix1) = @_;
     my $coords = $self->{coords};
+    my $scales = $self->{scales};
     my $sum = 0;
-    for my $coord (@$coords) {
-        my $delta = $coord->[$ix0] - $coord->[$ix1];
+    for my $dimension (0..$#{$coords}) {
+        my $delta = $scales->[$dimension] * ($coords->[$dimension][$ix0] - $coords->[$dimension][$ix1]);
         $sum += $delta * $delta;
     }
     sqrt($sum);
 }
+
 1;
 __END__
 
@@ -626,8 +699,12 @@ Algorithm::ClusterPoints - find clusters inside a set of points
 
 =head1 DESCRIPTION
 
-This module implements and algorithm to find clusters of points
-inside a set.
+This module implements an algorithm to find clusters of points inside
+a set.
+
+Clusters are defined as sets of points where it is possible to
+stablish a way between any pair of points moving from point to point
+inside the cluster in steps smaller than a given radius.
 
 Points can have any dimension from one to infinitum, though the
 algorithm performance degrades quickly as the dimension increases (it
@@ -644,9 +721,8 @@ geometric plane, dimension will be 2.
 
 =item $radius
 
-A point P is part of a cluster when there is at least another point
-from the cluster inside the (hyper-)circunference with center P and
-radius $radius.
+A point is part of a cluster when there is at least another point from
+the cluster that is at a distance smaller than $radius from it.
 
 =item $minimum_size
 
@@ -662,8 +738,8 @@ The coordinates of the points
 Order the points inside the clusters by their indexes and also order
 the clusters by the index of the contained points.
 
-Ordering the output data is optinal because it can be an computational
-expensive operation.
+Ordering the output data is optional because it can be an
+computational expensive operation.
 
 =back
 
@@ -699,6 +775,15 @@ minimun cluster size (default is 1).
 
 sort the returned data structures (default is false).
 
+=item scales => [$x_scale, $y_scale, ...]
+
+point coordinates are scaled by the coefficients given.
+
+=item dimensional_groups => \@dimension_groups
+
+See the "Using hypercylindrical distances" chapter below.
+
+
 =back
 
 =item $clp->add_point($x, $y, $z, ...)
@@ -722,6 +807,12 @@ They return the index of the (first) point added.
 =item $clp->ordered($ordered)
 
 These methods get or set the algorithm parameters.
+
+=item @scales = $clp->scales;
+
+=item @scales = $clp->scales($xs, $ys, $zs, ...);
+
+gets/sets the scales for all the dimensions.
 
 =item @coords = $clp->point_coords($index)
 
@@ -754,11 +845,11 @@ C<point_coords>, as for instance:
        ...
 
 Or you can use the method C<clusters> described below that already
-returns 2D coordinates.
+returns point coordinates.
 
 =item @clusters = $clp->clusters
 
-returns a list of clusters defined by the 2D coordinates of the points
+returns a list of clusters defined by the coordinates of the points
 inside.
 
 This method is similar to C<clusters_ix> but instead of the point
@@ -774,14 +865,84 @@ This is a sample of the returned structure:
                 [ 0.37, 0.38, 0.36, 0.44 ],
                 [ 0.16, 0.79, 0.14, 0.74 ] );
 
-Note that X and Y coordinate values are interleaved inside the arrays.
+Note that the coordinate values for all the dimensions are interleaved
+inside the arrays.
 
 =back
+
+=head2 Using hypercylindrical distances
+
+By default distances between points are meassured as euclidean
+distances. That means that two points A and B form a cluster when B is
+inside the hypersphere of radius $radius and center A. We will call
+this hypersphere the clustering limit surface for point A.
+
+Sometimes, specially when the dimensions represent unrelated entities,
+it is desirable to use hypercylinders as the clustering limit surfaces.
+
+For instance, suppose we have a set of three dimensional points ($x,
+$y, $t) where the first two dimensions represent coordinates over a
+geometrical plane and the third coordinate represents time.
+
+It doesn't make sense to mix space and time to calculate a unique
+distance, and so to have a spherical clustering limit surface. What we
+need is to set independent limits for geometrical and temporal
+dimensions, for instance C<$geo_distance < $geo_radius> and
+C<$temp_distance < $temp_radius> and these pair of constraints define
+a cylinder on our three-dimensional problem space.
+
+In the general multidimensional case, instead of cylinders, we talk
+about hypercylinders but the logic behind is the same, dimensions are
+divided in several groups (d-groups) following some problem defined
+relation and two points form a cluster when all the subdistances are
+smaller than the radius (where subdistance is the euclidean distance
+considering only the dimensions in a d-group). Note that every d-group
+defines a hypercylinder base.
+
+The method that allows to define the hypercylindrical shape is as
+follows:
+
+=over 4
+
+=item $clp->dimensional_groups(\@group0, \@group1, ...)
+
+where @group0, @group1, ... are lists of dimension indexes.
+
+For instance, for a three dimensional problem with dimensions X, Y and
+T (in that order), to form a group with the dimensions X and Y and
+another with the dimension T, the following call has to be used:
+
+  $clp->dimensional_groups([0, 1], [2]);
+
+=back
+
+The dimensional groups can also be set when the constructor is called:
+
+  my $clp = Algoritm::ClusterPoints->new(
+                       dimensional_groups => [[0, 1], [2]],
+                       ...);
+
+Usually, when using dimensional groups, you would also want to use the
+C<scales> method to set different scales for every dimension group.
+
+Following with the previous example, supposing X and Y are given in
+meters and T in seconds, to find the clusters with radius between
+points of 1Km and 2 days, the following scales should be used:
+
+  my $spc_scl = 1/1000;
+  my $tmp_scl = 1/(2 * 24 * 60 * 60);
+
+  $clp = Algorithm::ClusterPoints->new(
+                     dimensional_groups => [[0, 1], [2]],
+                     scales => [$spc_scl, $spc_scl, $tmp_scl],
+                     ...);
 
 =head1 SEE ALSO
 
 All began on this PerlMonks discussion:
 L<http://perlmonks.org/?node_id=694892>.
+
+L<Algorithm::Cluster> is a Perl wrapper for the C Clustering Library.
 
 =head1 COPYRIGHT AND LICENSE
 

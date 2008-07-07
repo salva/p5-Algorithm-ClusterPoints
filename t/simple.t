@@ -3,7 +3,7 @@
 use strict;
 use warnings;
 
-use Test::More tests => 1;
+use Test::More tests => 2;
 
 use Algorithm::ClusterPoints;
 
@@ -28,6 +28,9 @@ my @z = ( 0.701416015625000, 0.308532714843750, 0.103179931640625, 0.34262084960
           0.440246582031250, 0.555389404296875, 0.045349121093750, 0.227325439453125, 0.823425292968750,
           0.921325683593750, 0.507598876953125, 0.142578125000000, 0.767700195312500, 0.672821044921875 );
 
+my @sol = ( [ 0 ], [ 1 ], [ 2 ], [ 3, 8 ], [ 4, 15 ], [ 5 ], [ 6 ], [ 7, 10 ],
+            [ 9 ], [ 11, 16 ], [ 12 ], [ 13, 17 ], [ 14 ], [ 18 ], [ 19 ] );
+
 my $n = @x;
 
 my $clp = Algorithm::ClusterPoints->new(dimension => 3, ordered => 1, radius => 0.2);
@@ -37,7 +40,9 @@ my @bfc = $clp->brute_force_clusters_ix;
 my @c = $clp->clusters_ix;
 
 # use Data::Dumper;
-# print Data::Dumper->Dump([\@bfc, \@c], [qw($bfc $c)]);
-# print "distance(4, 15) = ".$clp->distance(4, 15)."\n";
+# print STDERR Data::Dumper->Dump([\@bfc, \@c], [qw($bfc $c)]);
+# print STDERR "distance(4, 15) = ".$clp->distance(4, 15)."\n";
 
-is_deeply(\@bfc, \@c, "simple 3d");
+is_deeply(\@c, \@sol, "simple 3d");
+is_deeply(\@bfc, \@sol, "simple 3d brute force");
+

@@ -24,10 +24,12 @@ use Algorithm::ClusterPoints;
 @ARGV = (3, 30, 300, 3_000, 30_000, 300_000) unless @ARGV;
 
 for my $n (@ARGV) {
+    # for my $dimension (2, 3) {
     for my $dimension (2, 3, 4) {
         my @coords;
         for (1..$dimension) {
-            push @coords, [random_normal($n, 11.24719, 0.805771)];
+            # push @coords, [random_normal($n, 11.24719, 0.805771)];
+            push @coords, [map { 11.24719 + 3 * 0.805771 * rand } 1..$n];
         }
         # my @x = random_normal($n, 11.24719, 0.805771);
         # my @y = random_normal($n, 22.47436, 0.974835);
