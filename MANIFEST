@@ -1,0 +1,11 @@
+Changes
+Makefile.PL
+MANIFEST
+README
+t/Algorithm-ClusterPoints.t
+t/simple.t
+lib/Algorithm/ClusterPoints.pm
+example/cluster.pl
+example/draw.pl
+example/benchmark.pl
+META.yml                                 Module meta-data (added by MakeMaker)
