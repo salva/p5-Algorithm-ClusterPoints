@@ -1,14 +1,11 @@
---- #YAML:1.0
-name:                Algorithm-ClusterPoints
-version:             0.06
-abstract:            ~
-license:             ~
-author:              
-    - Salvador Fandino <sfandino@yahoo.com>
-generated_by:        ExtUtils::MakeMaker version 6.42
-distribution_type:   module
-requires:     
+# http://module-build.sourceforge.net/META-spec.html
+#XXXXXXX This is a prototype!!!  It will change in the future!!! XXXXX#
+name:         Algorithm-ClusterPoints
+version:      0.07
+version_from: lib/Algorithm/ClusterPoints.pm
+installdirs:  site
+requires:
     Test::More:                    0
-meta-spec:
-    url:     http://module-build.sourceforge.net/META-spec-v1.3.html
-    version: 1.3
+
+distribution_type: module
+generated_by: ExtUtils::MakeMaker version 6.30_01

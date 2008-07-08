@@ -1,5 +1,9 @@
 Revision history for Perl extension Algorithm::ClusterPoints.
 
+0.07  Jul 8, 2008
+        - bug corrected on scales method
+        - better error messages for scales and add_point
+
 0.06  Jul 7, 2008
         - add support for hypercylindrical distances
 

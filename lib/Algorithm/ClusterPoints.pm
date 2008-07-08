@@ -1,6 +1,6 @@
 package Algorithm::ClusterPoints;
 
-our $VERSION = '0.06';
+our $VERSION = '0.07';
 
 use strict;
 use warnings;
@@ -57,7 +57,7 @@ sub new {
 sub add_point {
     my $self = shift;
     my $dimension = $self->{dimension};
-    @_ % $dimension and croak 'Usage: $clp->add_point($x0, $y0, ... [,$x1, $y1 ...])';
+    @_ % $dimension and croak 'coordinates list size is not a multiple of the problem dimension';
     delete $self->{_clusters};
     my $ix = @{$self->{coords}[0]};
     while (@_) {
@@ -119,9 +119,9 @@ sub minimum_size {
 
 sub scales {
     my $self = shift;
-    my $dimensions = $self->{dimensions};
+    my $dimension = $self->{dimension};
     if (@_) {
-        @_ == $dimensions or croak 'Usage: $self->scales($scale_x, $scale_y, ...)';
+        @_ == $dimension or croak 'number of scales does not match problem dimension';
         grep($_ <= 0, @_) and croak 'positive number required';
         @{$self->{scales}} = @_;
         delete $self->{_clusters};
