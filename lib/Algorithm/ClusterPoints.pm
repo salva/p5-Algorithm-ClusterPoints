@@ -1,6 +1,6 @@
 package Algorithm::ClusterPoints;
 
-our $VERSION = '0.07';
+our $VERSION = '0.08';
 
 use strict;
 use warnings;
@@ -390,14 +390,13 @@ sub _delta_hypercylinder {
 
         # filter out hyperpixels out of the hypercylinder
         for my $group (@_) {
-            my $max = sqrt(@$group);
             @delta_hypercylinder = grep {
                 my $sum = 0;
                 for (@$_[@$group]) {
                     my $min = ($_ ? abs($_) - 1 : 0);
                     $sum += $min * $min;
                 }
-                $sum < $max
+                $sum < @$group;
             } @delta_hypercylinder;
         }
 
@@ -405,10 +404,13 @@ sub _delta_hypercylinder {
 
         \@delta_hypercylinder
     };
+    # print Data::Dumper->Dump([$dhc], [qw($hc)]);
     @$dhc;
 }
 
-
+sub _print_clusters {
+    print join(',', @$_), "\n" for sort { $a->[0] <=> $b->[0] } @_;
+}
 
 sub _make_clusters_ix_any {
     my $self = shift;
@@ -444,7 +446,8 @@ sub _make_clusters_ix_any {
         my $cell = pack $packing => map $ifls[$_]{$fls[$_][$i]}, 0..$dimension_top;
         push @{$cell{$cell}}, $i;
     }
-    # print STDERR "\%cell:\n", Dumper [values %cell];
+    # print STDERR "\%cell:\n";
+    # _print_clusters(values %cell);
 
     my %cell2cluster; # n to 1 relation
     my %cluster2cell;
@@ -597,8 +600,10 @@ sub _points_touch {
             my $delta = $_->[$ix0] - $_->[$ix1];
             $sum += $delta * $delta;
         }
+        # print "sum: $sum\n";
         return 0 if $sum > 1;
     }
+    # printf STDERR "points %d and %d touch\n", $ix0, $ix1;
     return 1;
 }
 

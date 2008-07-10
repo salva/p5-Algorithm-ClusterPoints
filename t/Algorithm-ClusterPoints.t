@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 
-use Test::More tests => 216;
+use Test::More tests => 252;
 use Algorithm::ClusterPoints;
 
 use Data::Dumper;
@@ -9,7 +9,7 @@ sub some_partition;
 
 my $out;
 
-for my $dim (2, 3, 4) {
+for my $dim (2, 3, 5) {
     for my $n (1, 5, 30, 100) {
         my @points = map rand, 1..$n*$dim;
         my $clp = Algorithm::ClusterPoints->new(radius => 1, ordered => 1, minimum_size => 1, dimension => $dim);
